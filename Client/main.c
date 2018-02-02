@@ -2,7 +2,6 @@
 #include<string.h>
 #include<stdlib.h>
 #include <arpa/inet.h>
-//#include <sys/socket.h>
 #include<unistd.h>
 
 
@@ -23,7 +22,7 @@ int main(void)
     char buf[BUFLEN];
     char message[BUFLEN];
 
-    if ( (sockedFd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
+    if ((sockedFd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
     {
         errorLog("Error socket initialization");
     }
@@ -39,7 +38,7 @@ int main(void)
 
     if(!inet_aton(SERVER, &server.sin_addr))
     {
-        errorLog("Cannot convert address into network byte order\n");
+        errorLog("Invalid IP Address \n");
     }
 
     while(1)

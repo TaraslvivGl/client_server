@@ -2,8 +2,8 @@
 #include<string.h>
 #include<stdlib.h>
 #include <netinet/in.h>
-//#include<sys/socket.h>
 #include<unistd.h>
+#include <pthread.h>
 
 #define BUFLEN 512
 #define PORT 8888
@@ -14,12 +14,30 @@ void errorLog(char *s)
     exit(1);
 }
 
+void *exitOnRequest()
+{
+    char input[4];
+    while(strstr(input, "exit") == NULL)
+    {
+        scanf("%s", input);
+    }
+
+    printf("\nServer is shutting down...");
+    exit(0);
+}
+
 int main(void)
 {
+    pthread_t tid;
+    pthread_attr_t attr;
+
     struct sockaddr_in server;
     int sockedFd;
     char buf[BUFLEN];
-    memset(&buf[0], 0, sizeof(buf));
+
+    pthread_attr_init(&attr);
+    pthread_create(&tid, &attr, exitOnRequest, NULL);
+
     if ((sockedFd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
     {
         errorLog("Socket creation failed");
@@ -39,7 +57,6 @@ int main(void)
     printf("Running Server...\n");
     while(1)
     {
-        fflush(stdout);
         if (recv(sockedFd, buf, BUFLEN, 0) < 0)
         {
             errorLog("Receiving package failed");
