@@ -4,10 +4,13 @@
 #include <string.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <poll.h>
 #include <pthread.h>
 
 #define BUFLEN (512)
 #define PORT (8888)
+
+int running = 1;
 
 void errorLogExit(char *s)
 {
@@ -24,9 +27,9 @@ void *exitOnRequest(void * socket)
         fgets(input, 7, stdin);
     }while((strlen(input) != 5) || (strncmp(input, "exit", 4) != 0));
 
-    printf("\nServer is shutting down...\n");
+    printf("Server is shutting down...\n");
     close(*((int *)socket));
-    exit(0);
+    running = 0;
 }
 
 int main(void)
@@ -39,6 +42,8 @@ int main(void)
     int sockedFd;
     char* buf = malloc(BUFLEN);
     char* printBuf = NULL;
+    size_t needed_mem = 0;
+    int ret = 0;
 
     if ((sockedFd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
     {
@@ -60,24 +65,27 @@ int main(void)
     }
 
     memset(buf, 0, BUFLEN);
+
+    struct pollfd outFd[1];
+    outFd->fd = sockedFd;
+    outFd->events = POLLIN;
+
     printf("Running Server...\n");
-    size_t needed_mem = 0;
-    int ret = 0;
-    while(1)
-    {
-        if ((ret = recvfrom(sockedFd, buf, BUFLEN, 0, (struct sockaddr *) &client, &slen)) < 0)
-        {
-            close(sockedFd);
-            errorLogExit("Receiving package failed");
+    while(running) {
+        if (poll(outFd, 1, 1000) && (outFd[0].revents & POLLIN)) {
+            if ((ret = recvfrom(sockedFd, buf, BUFLEN, 0, (struct sockaddr *) &client, &slen)) < 0) {
+                close(sockedFd);
+                errorLogExit("Receiving package failed");
+            }
+
+            needed_mem = snprintf(NULL, 0, "%s", buf) + 1;
+            printBuf = realloc(printBuf, needed_mem);
+            snprintf(printBuf, BUFLEN, "%s", buf);
+            printf("Received package: %s\n", buf);
+
+            memset(buf, 0, strlen(buf));
+            memset(printBuf, 0, strlen(printBuf));
         }
-
-        needed_mem = snprintf(NULL, 0, "%s", buf) + 1;
-        printBuf = realloc(printBuf, needed_mem);
-        snprintf(printBuf, BUFLEN, "%s", buf);
-        printf("Received package: %s\n", buf);
-
-        memset(buf, 0, strlen(buf));
-        memset(printBuf, 0, strlen(printBuf));
     }
     return 0;
 }

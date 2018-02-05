@@ -1,16 +1,20 @@
+#include <errno.h>
 #include <arpa/inet.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <poll.h>
 
 #define SERVER "127.0.0.1"
 #define BUFLEN (512)
 #define PORT (8888)
 #define DATA_COUTN (1)
 
-void errorLog(const char* const s, const int socket, char** data)
+int running = 1;
+
+void errorLogExit(const char* const s, const int socket, char** data)
 {
     int i;
     for (i = 0; i < DATA_COUTN; i++)
@@ -46,7 +50,7 @@ void exitOnRequest(char** data, const int socket)
         close(socket);
     }
 
-    exit(0);
+    running = 0;
 }
 
 int main(void)
@@ -58,6 +62,7 @@ int main(void)
     char** data = malloc(DATA_COUTN * sizeof(char*));
     int ret = 0;
 
+    //data which will be cleaned on termination
     data[0] = message;
 
     /*Ctrl+C exit*/
@@ -69,7 +74,7 @@ int main(void)
 
     if ((sockedFd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
     {
-        errorLog("Error socket initialization", sockedFd, data);
+        errorLogExit("Error socket initialization", sockedFd, data);
     }
 
     memset(&server, 0, sizeof(server));
@@ -79,47 +84,33 @@ int main(void)
     /*connection to server*/
     if (connect(sockedFd, (struct sockaddr *)&server, sizeof(server)) < 0)
     {
-        errorLog("Cannot connect to server\n", sockedFd, data);
+        errorLogExit("Cannot connect to server\n", sockedFd, data);
     }
 
     if(!inet_aton(SERVER, &server.sin_addr))
     {
-        errorLog("Invalid IP Address \n", sockedFd, data);
+        errorLogExit("Invalid IP Address \n", sockedFd, data);
     }
 
-    size_t msgCount = 1;
-    int lastPkg = 1;
-    while (1)
-    {
-        //last package has been sent
-        if (lastPkg)
-        {
-            printf("Enter message: ");
-            msgCount = 1;
-        }
+    struct pollfd outFd[1];
+    outFd->fd = fileno(stdin);
+    outFd->events = POLLIN;
 
-        if ((fgets(message, BUFLEN, stdin)) != NULL)
-        {
+    printf("Message to sent:\n");
+    while (running) {
+        if ((poll(outFd, 1, 1000)) && (outFd[0].revents & POLLIN)) {
+            fgets(message, BUFLEN, stdin);
             //trim character '\n' from the last buffer from stdin
-            if(message[strlen(message) - 1] == '\n')
-            {
+            if (message[strlen(message) - 1] == '\n') {
                 message[strlen(message) - 1] = '\0';
-                lastPkg = 1;
-            }
-            else
-            {
-                lastPkg = 0;
             }
 
-            if ((strlen(message) != 0) && ((ret = send(sockedFd, message, strlen(message), 0)) < 0))
-            {
-                errorLog("Cannot send message\n", sockedFd, data);
-            }
-            else if ((strlen(message) != 0))
-            {
-                printf("Package(%lu) has been sent %d bytes of %lu\n", msgCount, ret, strlen(message));
-                msgCount++;
+            if ((ret = send(sockedFd, message, strlen(message), 0)) < 0) {
+                errorLogExit("Cannot send message\n", sockedFd, data);
+            } else {
+                printf("%d bytes have been sent\n", ret);
             }
         }
     }
+    return 0;
 }
