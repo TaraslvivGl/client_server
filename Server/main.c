@@ -12,14 +12,12 @@
 
 int running = 1;
 
-void errorLogExit(char *s)
-{
+void errorLogExit(char *s) {
     perror(s);
     exit(1);
 }
 
-void *exitOnRequest(void * socket)
-{
+void *exitOnRequest(void* param) {
     char input[6];
     memset(input, 0 , sizeof(input));
 
@@ -28,31 +26,31 @@ void *exitOnRequest(void * socket)
     }while((strlen(input) != 5) || (strncmp(input, "exit", 4) != 0));
 
     printf("Server is shutting down...\n");
-    close(*((int *)socket));
+
     running = 0;
 }
 
-int main(void)
-{
+int main(void) {
     pthread_t tid;
 
     struct sockaddr_in server;
     struct sockaddr_in client;
-    int slen = sizeof(client);
     int sockedFd;
+    int slen = sizeof(client);
+    int ret = 0;
+    size_t needed_mem = 0;
     char* buf = malloc(BUFLEN);
     char* printBuf = NULL;
-    size_t needed_mem = 0;
-    int ret = 0;
 
     if ((sockedFd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
     {
         errorLogExit("Socket creation failed");
     }
 
-    pthread_create(&tid, NULL, exitOnRequest, (void*) &sockedFd);
+    pthread_create(&tid, NULL, exitOnRequest, NULL);
 
     memset(&server, 0, sizeof(server));
+    memset(&client, 0, sizeof(client));
 
     server.sin_family = AF_INET;
     server.sin_port = htons(PORT);
@@ -87,5 +85,11 @@ int main(void)
             memset(printBuf, 0, strlen(printBuf));
         }
     }
+
+    if(printBuf != NULL){
+        free(printBuf);
+    }
+    free(buf);
+    close(sockedFd);
     return 0;
 }
