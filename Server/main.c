@@ -1,4 +1,3 @@
-#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,44 +5,43 @@
 #include <unistd.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sys/eventfd.h>
 
 #define BUFLEN (512)
 #define PORT (8888)
 
-int running = 1;
+int exitEventFd;
 
 void errorLogExit(char *s) {
     perror(s);
     exit(1);
 }
 
-void *exitOnRequest(void* param) {
-    char input[6];
+void *exitOnRequest(void* args) {
+    char input[sizeof("exit")];
     memset(input, 0 , sizeof(input));
 
     do {
-        fgets(input, 7, stdin);
-    }while((strlen(input) != 5) || (strncmp(input, "exit", 4) != 0));
+        fgets(input, sizeof("exit\n"), stdin);
+    } while(strncmp(input, "exit\n", strlen("exit\n")) != 0);
 
     printf("Server is shutting down...\n");
 
-    running = 0;
+    uint64_t trigger = 1;
+    write(exitEventFd, &trigger, sizeof(trigger));
 }
 
 int main(void) {
-    pthread_t tid;
 
+    pthread_t tid;
     struct sockaddr_in server;
     struct sockaddr_in client;
     int sockedFd;
-    int slen = sizeof(client);
-    int ret = 0;
-    size_t needed_mem = 0;
+    int clientLen = sizeof(client);
     char* buf = malloc(BUFLEN);
-    char* printBuf = NULL;
+    char* printBuf = malloc(BUFLEN);;
 
-    if ((sockedFd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
-    {
+    if ((sockedFd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
         errorLogExit("Socket creation failed");
     }
 
@@ -56,40 +54,48 @@ int main(void) {
     server.sin_port = htons(PORT);
     server.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    if (bind(sockedFd, (struct sockaddr*)&server, sizeof(server)) < 0)
-    {
+    if (bind(sockedFd, (struct sockaddr*)&server, sizeof(server)) < 0) {
         close(sockedFd);
         errorLogExit("Socket is used already\n");
     }
 
     memset(buf, 0, BUFLEN);
 
-    struct pollfd outFd[1];
-    outFd->fd = sockedFd;
-    outFd->events = POLLIN;
+    exitEventFd = eventfd(0, 0);
+    struct pollfd outFd[2];
+    outFd[0].fd = sockedFd;
+    outFd[0].events = POLLIN;
+
+    outFd[1].fd = exitEventFd;
+    outFd[1].events = POLLIN;
 
     printf("Running Server...\n");
-    while(running) {
-        if (poll(outFd, 1, 1000) && (outFd[0].revents & POLLIN)) {
-            if ((ret = recvfrom(sockedFd, buf, BUFLEN, 0, (struct sockaddr *) &client, &slen)) < 0) {
-                close(sockedFd);
-                errorLogExit("Receiving package failed");
+    while(1) {
+
+        if (poll(outFd, 2, -1)) {
+
+            if (outFd[1].revents & POLLIN) {
+                break;
             }
 
-            needed_mem = snprintf(NULL, 0, "%s", buf) + 1;
-            printBuf = realloc(printBuf, needed_mem);
-            snprintf(printBuf, BUFLEN, "%s", buf);
-            printf("Received package: %s\n", buf);
+            if (outFd[0].revents & POLLIN) {
+                if ((recvfrom(sockedFd, buf, BUFLEN, 0, (struct sockaddr *) &client, &clientLen)) < 0) {
+                    close(sockedFd);
+                    errorLogExit("Receiving package failed");
+                }
 
-            memset(buf, 0, strlen(buf));
-            memset(printBuf, 0, strlen(printBuf));
+                snprintf(printBuf, BUFLEN, "%s", buf);
+                printf("Received package: %s\n", buf);
+
+                memset(buf, 0, strlen(buf));
+                memset(printBuf, 0, strlen(printBuf));
+            }
         }
     }
 
-    if(printBuf != NULL){
-        free(printBuf);
-    }
+    free(printBuf);
     free(buf);
     close(sockedFd);
+    close(exitEventFd);
     return 0;
 }
