@@ -6,3 +6,7 @@ Client/cmake-build-debug/*
 Client/.idea/*
 Server/cmake-build-debug/*
 Server/.idea/*
+ThreadSafeQueue/cmake-build-debug/
+ThreadSafeQueue/.idea/
+ThreadSafeQueue/cmake-build-debug/*
+ThreadSafeQueue/.idea/*
