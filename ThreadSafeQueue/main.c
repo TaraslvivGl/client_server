@@ -6,75 +6,87 @@
 #include <stdbool.h>
 
 #define QUEUE_SIZE (5)
-#define MSG_SIZE (80)
+#define MSG_SIZE (20)
 
-struct safeQueue{
+/* Structure queue with strict size */
+struct SafeQueue
+{
     char** queue;
     pthread_mutex_t mutex;
-    pthread_cond_t cv;
+    //if queue is empty
+    pthread_cond_t empty;
+    //amount of elements in queue
     size_t counter;
-} sQueue;
+};
 
-void init_queue(unsigned int size) {
-    sQueue.queue = malloc(size * sizeof(char*));
+/* Initialization of SafeQueue */
+void init_queue(struct SafeQueue * squeue, unsigned int size) {
+    pthread_mutex_init(&squeue->mutex, NULL);
+    pthread_cond_init(&squeue->empty, NULL);
+
+    squeue->queue = malloc(size * sizeof(char*));
     int i;
     for (i = 0; i < size; i++) {
-        sQueue.queue[i] = NULL;
+        squeue->queue[i] = NULL;
     }
-    sQueue.counter = 0;
+    squeue->counter = 0;
 }
 
-void* mq_get() {
+/* Pop element from queue */
+void* mq_get(struct SafeQueue * squeue)
+{
     int i;
     char* ret;
+    pthread_mutex_lock(&squeue->mutex);
 
-    pthread_mutex_lock(&sQueue.mutex);
-
-    while(sQueue.counter == 0) {
-        pthread_cond_wait(&sQueue.cv, &sQueue.mutex);
+    //wait while queue is empty
+    while(squeue->counter == 0) {
+        pthread_cond_wait(&squeue->empty, &squeue->mutex);
     }
 
-    ret = sQueue.queue[0];
+    ret = squeue->queue[0];
     // TODO: use memmove to cut first
-    for(i = 0; i < sQueue.counter-1; i++) {
-        sQueue.queue[i] = sQueue.queue[i+1];
+    for(i = 0; i < squeue->counter-1; i++) {
+        squeue->queue[i] = squeue->queue[i+1];
     }
 
-    sQueue.counter--;
-    pthread_mutex_unlock(&sQueue.mutex);
+    squeue->counter--;
+    pthread_mutex_unlock(&squeue->mutex);
 
     return (void*)ret;
 }
 
-bool mq_put(const void* message)
+/*Push element to queue*/
+bool mq_put(struct SafeQueue * squeue, const void* message)
 {
-    pthread_mutex_lock(&sQueue.mutex);
-
+    pthread_mutex_lock(&(squeue->mutex));
     bool ret = false;
 
-    if(sQueue.counter < QUEUE_SIZE)
+    if(squeue->counter < QUEUE_SIZE)
     {
-        sQueue.queue[sQueue.counter] = (char *)malloc(MSG_SIZE);
-        memset(sQueue.queue[sQueue.counter], 0, MSG_SIZE);
-        snprintf(sQueue.queue[sQueue.counter], MSG_SIZE,"%s", (char*)message);
-        sQueue.counter++;
+        // add new element
+        squeue->queue[squeue->counter] = (char *)malloc(MSG_SIZE);
+        memset(squeue->queue[squeue->counter], 0, MSG_SIZE);
+        snprintf(squeue->queue[squeue->counter], MSG_SIZE, "%s", (char*)message);
+        squeue->counter++;
         ret = true;
     }
 
-    pthread_mutex_unlock(&sQueue.mutex);
-    // wake up waiting thread
-    pthread_cond_signal(&sQueue.cv);
+    pthread_mutex_unlock(&squeue->mutex);
+    // notify waiting thread
+    pthread_cond_signal(&squeue->empty);
 
     return ret;
 }
 
-void printQueue()
+/*Print elements of a queue*/
+void printQueue(struct SafeQueue * squeue)
 {
     int i;
-    if(sQueue.counter != 0)
+    if(squeue->counter != 0)
     {
-        for (i = 0; i < sQueue.counter; i++)
-            printf("%s ", sQueue.queue[i]);
+        for (i = 0; i < squeue->counter; i++)
+            printf("%s ", squeue->queue[i]);
     }
     else
     {
@@ -82,118 +94,102 @@ void printQueue()
     }
 }
 
-void destroy() {
+/* Free allocated memory of a queue*/
+void destroy(struct SafeQueue * squeue) {
     int i;
     for(i = 0; i < QUEUE_SIZE; i++) {
-        if(sQueue.queue[i] != NULL) {
-            free(sQueue.queue[i]);
+        if(squeue->queue[i] != NULL) {
+            free(squeue->queue[i]);
         }
     }
 
-    free(sQueue.queue);
+    free(squeue->queue);
 }
 
-//Help functions:
-void* getFromQueue(void* returnValue)
+//Help structure to set queue and element into thread
+struct PutArgs
 {
-    printf("\nPop: %s", (char*)mq_get());
+    struct SafeQueue * que;
+    void* elem;
+};
+
+/*Calls  mq_get and print gotten element from queue*/
+void* getFromQueue(void * param)
+{
+    struct SafeQueue * queue = (struct SafeQueue *) param;
+
+    char* popElem = (char*)mq_get(queue);
+    printf("\nPop: %s", popElem);
 }
 
+/*Calls  mq_put and print putted element to queue*/
 void* putToQueue(void* param)
 {
-    mq_put(param);
-    printf("\nPush: %s", (char*)param);
+    struct PutArgs * args = (struct PutArgs *) param;
+    mq_put(args->que, args->elem);
+    printf("\nPush: %s", (char*) args->elem);
 }
 
-
-/*The same amount of thread to read and write
- * Queue shell be empty*/
-void testEmptyQueue();
-
-/* 7 threads take from queue and 10 put into queue
- * Queue shell be not empty. 3 elements shell be left*/
-void testNotEmptyQueue();
+/* Function tests how much element are left in queue
+ * after push and pop actions and print them.
+ *
+ * param getThreads - amount of threads which pop element from a queue.
+ * param putThreads - amount of threads which push element to a queue.*/
+void testQueue(struct SafeQueue * queue, size_t getThreads, size_t putThreads);
 
 int main() {
 
-    printf("Test 1 starts\n");
-    testEmptyQueue();
+    struct SafeQueue que;
+    size_t getThreads = 5;
+    size_t putThreads = 5;
 
-    //for test finishing
+    printf("Test 1: %lu times push and pop.\nQueue shell be empty.\n", getThreads);
+    testQueue(&que, getThreads, putThreads);
+
+    //delay for test finishing
     sleep(1);
 
-    printf("Test 2 starts\n");
-    testNotEmptyQueue();
+    getThreads = 7;
+    putThreads = 10;
+    printf("Test 2: %lu times pop and %lu times push.\nQueue shell contain %lu element(s)\n",
+           getThreads, putThreads, putThreads - getThreads);
+    testQueue(&que, getThreads, putThreads);
 
-    //for test finishing
+    //delay for test finishing
     sleep(1);
     return 0;
 }
 
-void testEmptyQueue()
+void testQueue(struct SafeQueue * queue, size_t getThreads, size_t putThreads)
 {
-    init_queue(QUEUE_SIZE);
-
-    size_t getThreds = 5;
-    size_t putThreds = 5;
+    init_queue(queue, QUEUE_SIZE);
     size_t inputBuffSize = 12;
 
     int i;
-    pthread_t id_get[getThreds];
-    for(i = 0; i < getThreds; i++)
+    pthread_t id_get[getThreads];
+    for(i = 0; i < getThreads; i++)
     {
-        pthread_create(&id_get[i], NULL, getFromQueue, NULL);
+        pthread_create(&id_get[i], NULL, getFromQueue, (void*)queue);
     }
 
-    char* buff = malloc(inputBuffSize);
-    pthread_t id_put[putThreds];
-    for(i = 0; i < putThreds; i++)
+    struct PutArgs * putElem = malloc(sizeof(struct PutArgs));
+    char buff[inputBuffSize];
+    pthread_t id_put[putThreads];
+    for(i = 0; i < putThreads; i++)
     {
         snprintf(buff, inputBuffSize, "%s(%d)", "thread", i);
-        pthread_create(&id_put[i], NULL, putToQueue, (void*)buff);
+        putElem->que = queue;
+        putElem->elem = (void*)buff;
+        pthread_create(&id_put[i], NULL, putToQueue, (void*)putElem);
         pthread_join(id_put[i], NULL);
     }
 
     //show Queue
     printf("\n\nQueue:");
-    printQueue();
+    printQueue(queue);
     printf("\n");
 
     //free memory
-    free(buff);
-    destroy();
-}
-
-void testNotEmptyQueue()
-{
-    init_queue(QUEUE_SIZE);
-
-    size_t getThreds = 7;
-    size_t putThreds = 10;
-    size_t inputBuffSize = 12;
-
-    int i;
-    pthread_t id_get[getThreds];
-    for(i = 0; i < getThreds; i++)
-    {
-        pthread_create(&id_get[i], NULL, getFromQueue, NULL);
-    }
-
-    char* buff = malloc(inputBuffSize);
-    pthread_t id_put[putThreds];
-    for(i = 0; i < putThreds; i++)
-    {
-        snprintf(buff, inputBuffSize, "%s(%d)", "thread", i);
-        pthread_create(&id_put[i], NULL, putToQueue, (void*)buff);
-        pthread_join(id_put[i], NULL);
-    }
-
-    //show Queue
-    printf("\n\nQueue:");
-    printQueue();
-    printf("\n");
-
-    //free memory
-    free(buff);
-    destroy();
+    free(putElem);
+    destroy(queue);
 }
